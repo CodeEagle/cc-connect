@@ -29,8 +29,7 @@ export default function Login() {
 
   useEffect(() => {
     if (autoLoginAttempted.current) return;
-    const qToken = searchParams.get('token');
-    if (!qToken) return;
+    const qToken = searchParams.get('token') || '';
     autoLoginAttempted.current = true;
 
     (async () => {
@@ -41,8 +40,10 @@ export default function Login() {
         loginStore(qToken);
         navigate('/', { replace: true });
       } catch {
-        setToken(qToken);
-        setError(t('login.invalidToken'));
+        if (qToken) {
+          setToken(qToken);
+          setError(t('login.invalidToken'));
+        }
         api.setToken('');
       } finally {
         setLoading(false);
