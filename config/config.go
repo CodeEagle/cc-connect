@@ -1569,8 +1569,8 @@ func EnsureProjectWithFeishuPlatform(opts EnsureProjectWithFeishuOptions) (*Ensu
 	return &EnsureProjectWithFeishuResult{
 		Created:          true,
 		AddedPlatform:    false,
-		ProjectIndex:     len(cfg.Projects) - 1,
-		PlatformAbsIndex: len(cfg.Projects[len(cfg.Projects)-1].Platforms) - 1,
+		ProjectIndex:     len(cfg.Projects),
+		PlatformAbsIndex: 0,
 		PlatformType:     platformType,
 	}, nil
 }

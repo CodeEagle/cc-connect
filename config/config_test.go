@@ -1180,6 +1180,12 @@ func TestEnsureProjectWithFeishuPlatform_CreatesMissingProject(t *testing.T) {
 	if result.AddedPlatform {
 		t.Fatal("result.AddedPlatform = true, want false")
 	}
+	if result.ProjectIndex != 1 {
+		t.Fatalf("result.ProjectIndex = %d, want 1", result.ProjectIndex)
+	}
+	if result.PlatformAbsIndex != 0 {
+		t.Fatalf("result.PlatformAbsIndex = %d, want 0", result.PlatformAbsIndex)
+	}
 
 	cfg := readConfigFixture(t, configPath)
 	if len(cfg.Projects) != 2 {
