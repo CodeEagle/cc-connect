@@ -221,6 +221,10 @@ func main() {
 			opts["cc_project"] = proj.Name
 			p, err := core.CreatePlatform(pc.Type, opts)
 			if err != nil {
+				if cfg.Management.Enabled != nil && *cfg.Management.Enabled {
+					slog.Warn("skipping platform with invalid configuration", "project", proj.Name, "type", pc.Type, "error", err)
+					continue
+				}
 				slog.Error("failed to create platform", "project", proj.Name, "type", pc.Type, "error", err)
 				os.Exit(1)
 			}
