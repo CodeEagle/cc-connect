@@ -4,6 +4,8 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"testing"
+
+	"github.com/chenhg5/cc-connect/core"
 )
 
 func TestFormatAesKeyForAPI(t *testing.T) {
@@ -110,5 +112,150 @@ func TestGetUploadURLResponse_Validation(t *testing.T) {
 				t.Errorf("validation error = %v, wantError %v", hasError, tt.wantError)
 			}
 		})
+	}
+}
+
+func TestClassifyOutboundFile(t *testing.T) {
+	tests := []struct {
+		name string
+		file core.FileAttachment
+		want string
+	}{
+		{
+			name: "audio mime",
+			file: core.FileAttachment{MimeType: "audio/mpeg", FileName: "reply.bin"},
+			want: "audio",
+		},
+		{
+			name: "audio extension",
+			file: core.FileAttachment{MimeType: "application/octet-stream", FileName: "reply.amr"},
+			want: "audio",
+		},
+		{
+			name: "video mime",
+			file: core.FileAttachment{MimeType: "video/mp4", FileName: "reply.bin"},
+			want: "video",
+		},
+		{
+			name: "video extension",
+			file: core.FileAttachment{MimeType: "application/octet-stream", FileName: "reply.mov"},
+			want: "video",
+		},
+		{
+			name: "generic file",
+			file: core.FileAttachment{MimeType: "application/pdf", FileName: "report.pdf"},
+			want: "file",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := classifyOutboundFile(tt.file); got != tt.want {
+				t.Fatalf("classifyOutboundFile() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestAudioFormatFromFile(t *testing.T) {
+	tests := []struct {
+		file core.FileAttachment
+		want string
+	}{
+		{file: core.FileAttachment{FileName: "reply.mp3", MimeType: "application/octet-stream"}, want: "mp3"},
+		{file: core.FileAttachment{MimeType: "audio/mpeg"}, want: "mp3"},
+		{file: core.FileAttachment{MimeType: "audio/x-wav"}, want: "wav"},
+		{file: core.FileAttachment{FileName: "reply.oga"}, want: "ogg"},
+	}
+	for _, tt := range tests {
+		if got := audioFormatFromFile(tt.file); got != tt.want {
+			t.Fatalf("audioFormatFromFile(%+v) = %q, want %q", tt.file, got, tt.want)
+		}
+	}
+}
+
+func TestBuildVideoMessageItemUsesVideoShape(t *testing.T) {
+	ref := testUploadedRef()
+	item := buildVideoMessageItem(ref)
+
+	if item.Type != messageItemVideo {
+		t.Fatalf("item type = %d, want video %d", item.Type, messageItemVideo)
+	}
+	if item.VideoItem == nil {
+		t.Fatal("expected video item")
+	}
+	if item.FileItem != nil {
+		t.Fatal("video should not be sent as file item")
+	}
+	if item.VideoItem.VideoSize != ref.cipherSize {
+		t.Fatalf("video_size = %d, want %d", item.VideoItem.VideoSize, ref.cipherSize)
+	}
+	assertCDNMedia(t, item.VideoItem.Media, ref)
+}
+
+func TestBuildVoiceMessageItemUsesVoiceShape(t *testing.T) {
+	ref := testUploadedRef()
+	item := buildVoiceMessageItem(ref, 5, 8000, 60)
+
+	if uploadMediaVoice != 4 {
+		t.Fatalf("uploadMediaVoice = %d, want 4", uploadMediaVoice)
+	}
+	if item.Type != messageItemVoice {
+		t.Fatalf("item type = %d, want voice %d", item.Type, messageItemVoice)
+	}
+	if item.VoiceItem == nil {
+		t.Fatal("expected voice item")
+	}
+	if item.FileItem != nil {
+		t.Fatal("voice should not be sent as file item")
+	}
+	if item.VoiceItem.EncodeType != 5 {
+		t.Fatalf("encode_type = %d, want AMR encode type 5", item.VoiceItem.EncodeType)
+	}
+	if item.VoiceItem.SampleRate != 8000 {
+		t.Fatalf("sample_rate = %d, want 8000", item.VoiceItem.SampleRate)
+	}
+	if item.VoiceItem.Playtime != 60 {
+		t.Fatalf("playtime = %d, want 60", item.VoiceItem.Playtime)
+	}
+	assertCDNMedia(t, item.VoiceItem.Media, ref)
+}
+
+func TestEstimateAMRPlaytimeMS(t *testing.T) {
+	data := []byte("#!AMR\n")
+	frame := append([]byte{7 << 3}, make([]byte, 31)...)
+	data = append(data, frame...)
+	data = append(data, frame...)
+	data = append(data, frame...)
+
+	if got := estimateAMRPlaytimeMS(data); got != 60 {
+		t.Fatalf("estimateAMRPlaytimeMS() = %d, want 60", got)
+	}
+	if got := estimateAMRPlaytimeMS([]byte("not-amr")); got != 0 {
+		t.Fatalf("non-AMR playtime = %d, want 0", got)
+	}
+}
+
+func testUploadedRef() *cdnUploadedRef {
+	return &cdnUploadedRef{
+		downloadParam: "download-param",
+		aesKey:        []byte{0x00, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88, 0x99, 0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff},
+		cipherSize:    128,
+		rawSize:       123,
+	}
+}
+
+func assertCDNMedia(t *testing.T, media *cdnMedia, ref *cdnUploadedRef) {
+	t.Helper()
+	if media == nil {
+		t.Fatal("expected CDN media")
+	}
+	if media.EncryptQueryParam != ref.downloadParam {
+		t.Fatalf("encrypt_query_param = %q, want %q", media.EncryptQueryParam, ref.downloadParam)
+	}
+	if media.AESKey != formatAesKeyForAPI(ref.aesKey) {
+		t.Fatalf("aes_key = %q, want %q", media.AESKey, formatAesKeyForAPI(ref.aesKey))
+	}
+	if media.EncryptType != 1 {
+		t.Fatalf("encrypt_type = %d, want 1", media.EncryptType)
 	}
 }
