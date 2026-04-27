@@ -707,5 +707,6 @@ var (
 	_ core.FormattingInstructionProvider = (*Platform)(nil)
 	_ core.ImageSender                   = (*Platform)(nil)
 	_ core.FileSender                    = (*Platform)(nil)
+	_ core.AudioSender                   = (*Platform)(nil)
 	_ core.TypingIndicator               = (*Platform)(nil)
 )

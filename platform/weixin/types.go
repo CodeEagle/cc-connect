@@ -19,6 +19,7 @@ const (
 	uploadMediaImage = 1
 	uploadMediaVideo = 2
 	uploadMediaFile  = 3
+	uploadMediaVoice = 4
 
 	typingStatusStart = 1
 	typingStatusStop  = 2
@@ -88,9 +89,12 @@ type messageItem struct {
 }
 
 type voiceItem struct {
-	Media      *cdnMedia `json:"media,omitempty"`
-	Text       string    `json:"text,omitempty"`
-	EncodeType int       `json:"encode_type,omitempty"`
+	Media         *cdnMedia `json:"media,omitempty"`
+	Text          string    `json:"text,omitempty"`
+	EncodeType    int       `json:"encode_type,omitempty"`
+	BitsPerSample int       `json:"bits_per_sample,omitempty"`
+	SampleRate    int       `json:"sample_rate,omitempty"`
+	Playtime      int       `json:"playtime,omitempty"`
 }
 
 type getUploadURLRequest struct {

@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -112,6 +113,49 @@ func (p *Platform) sendSingleItem(ctx context.Context, rc *replyContext, item me
 	return p.sendSingleItemWithRetry(ctx, rc, item)
 }
 
+func mediaFromUploadRef(ref *cdnUploadedRef) *cdnMedia {
+	return &cdnMedia{
+		EncryptQueryParam: ref.downloadParam,
+		AESKey:            formatAesKeyForAPI(ref.aesKey),
+		EncryptType:       1,
+	}
+}
+
+func buildFileMessageItem(name string, ref *cdnUploadedRef) messageItem {
+	return messageItem{
+		Type: messageItemFile,
+		FileItem: &fileItem{
+			Media:    mediaFromUploadRef(ref),
+			FileName: name,
+			Len:      fmt.Sprintf("%d", ref.rawSize),
+		},
+	}
+}
+
+func buildVideoMessageItem(ref *cdnUploadedRef) messageItem {
+	return messageItem{
+		Type: messageItemVideo,
+		VideoItem: &videoItem{
+			Media:     mediaFromUploadRef(ref),
+			VideoSize: ref.cipherSize,
+		},
+	}
+}
+
+func buildVoiceMessageItem(ref *cdnUploadedRef, encodeType, sampleRate, playtimeMS int) messageItem {
+	v := &voiceItem{
+		Media:      mediaFromUploadRef(ref),
+		EncodeType: encodeType,
+	}
+	if sampleRate > 0 {
+		v.SampleRate = sampleRate
+	}
+	if playtimeMS > 0 {
+		v.Playtime = playtimeMS
+	}
+	return messageItem{Type: messageItemVoice, VoiceItem: v}
+}
+
 // sendSingleItemWithRetry sends a media item with retry mechanism for ret=-2 errors.
 func (p *Platform) sendSingleItemWithRetry(ctx context.Context, rc *replyContext, item messageItem) error {
 	var lastErr error
@@ -172,11 +216,7 @@ func (p *Platform) SendImage(ctx context.Context, replyCtx any, img core.ImageAt
 	item := messageItem{
 		Type: messageItemImage,
 		ImageItem: &imageItem{
-			Media: &cdnMedia{
-				EncryptQueryParam: ref.downloadParam,
-				AESKey:            formatAesKeyForAPI(ref.aesKey),
-				EncryptType:       1,
-			},
+			Media:   mediaFromUploadRef(ref),
 			MidSize: ref.cipherSize,
 		},
 	}
@@ -196,28 +236,28 @@ func (p *Platform) SendFile(ctx context.Context, replyCtx any, file core.FileAtt
 	if name == "" {
 		name = "file.bin"
 	}
+
+	switch classifyOutboundFile(file) {
+	case "audio":
+		return p.SendAudio(ctx, replyCtx, file.Data, audioFormatFromFile(file))
+	case "video":
+		ref, err := p.uploadToWeixinCDN(ctx, rc.peerUserID, file.Data, uploadMediaVideo, "SendFileVideo")
+		if err != nil {
+			return err
+		}
+		return p.sendSingleItem(ctx, rc, buildVideoMessageItem(ref))
+	}
+
 	ref, err := p.uploadToWeixinCDN(ctx, rc.peerUserID, file.Data, uploadMediaFile, "SendFile")
 	if err != nil {
 		return err
 	}
-	item := messageItem{
-		Type: messageItemFile,
-		FileItem: &fileItem{
-			Media: &cdnMedia{
-				EncryptQueryParam: ref.downloadParam,
-				AESKey:            formatAesKeyForAPI(ref.aesKey),
-				EncryptType:       1,
-			},
-			FileName: name,
-			Len:      fmt.Sprintf("%d", ref.rawSize),
-		},
-	}
-	return p.sendSingleItem(ctx, rc, item)
+	return p.sendSingleItem(ctx, rc, buildFileMessageItem(name, ref))
 }
 
 // SendAudio implements core.AudioSender.
-// Weixin voice messages require AMR or SILK format. Since SILK encoding is not
-// widely supported, we convert to AMR format using ffmpeg.
+// Weixin native voice messages use item type VOICE and media type VOICE.
+// TTS output is usually MP3 or WAV, so unsupported formats are converted to AMR.
 func (p *Platform) SendAudio(ctx context.Context, replyCtx any, audio []byte, format string) error {
 	rc, err := p.resolveReplyContext(replyCtx)
 	if err != nil {
@@ -233,7 +273,12 @@ func (p *Platform) SendAudio(ctx context.Context, replyCtx any, audio []byte, fo
 	if sendFormat == "" {
 		sendFormat = "wav" // TTS typically outputs WAV
 	}
-	if sendFormat != "amr" {
+	encodeType := 5 // AMR
+	sampleRate := 8000
+	if sendFormat == "silk" {
+		encodeType = 6
+		sampleRate = 0
+	} else if sendFormat != "amr" {
 		converted, err := core.ConvertAudioToAMR(ctx, audio, sendFormat)
 		if err != nil {
 			return fmt.Errorf("weixin: convert %s to AMR: %w", sendFormat, err)
@@ -241,26 +286,109 @@ func (p *Platform) SendAudio(ctx context.Context, replyCtx any, audio []byte, fo
 		sendData = converted
 		sendFormat = "amr"
 	}
+	playtimeMS := 0
+	if sendFormat == "amr" {
+		playtimeMS = estimateAMRPlaytimeMS(sendData)
+	}
 
-	slog.Debug("weixin: audio converted", "format", sendFormat, "size", len(sendData))
+	slog.Debug("weixin: audio converted", "format", sendFormat, "size", len(sendData), "playtime_ms", playtimeMS)
 
-	// Upload to CDN as file type (voice uses same CDN upload mechanism)
-	ref, err := p.uploadToWeixinCDN(ctx, rc.peerUserID, sendData, uploadMediaFile, "SendAudio")
+	ref, err := p.uploadToWeixinCDN(ctx, rc.peerUserID, sendData, uploadMediaVoice, "SendAudio")
 	if err != nil {
 		return err
 	}
 
-	// Send as voice message
-	item := messageItem{
-		Type: messageItemVoice,
-		VoiceItem: &voiceItem{
-			Media: &cdnMedia{
-				EncryptQueryParam: ref.downloadParam,
-				AESKey:            formatAesKeyForAPI(ref.aesKey),
-				EncryptType:       1,
-			},
-			EncodeType: 0, // 0 = AMR format, 1 = SILK format
-		},
-	}
+	item := buildVoiceMessageItem(ref, encodeType, sampleRate, playtimeMS)
+	slog.Debug("weixin: sending voice item",
+		"item_type", item.Type,
+		"media_type", uploadMediaVoice,
+		"encode_type", encodeType,
+		"sample_rate", sampleRate,
+		"playtime_ms", playtimeMS,
+		"voice_size", len(sendData),
+		"has_download_param", ref.downloadParam != "",
+		"has_aes_key", len(ref.aesKey) > 0,
+	)
 	return p.sendSingleItem(ctx, rc, item)
+}
+
+func classifyOutboundFile(file core.FileAttachment) string {
+	mime := strings.ToLower(strings.TrimSpace(file.MimeType))
+	ext := strings.TrimPrefix(strings.ToLower(filepath.Ext(file.FileName)), ".")
+	if strings.HasPrefix(mime, "audio/") || isAudioExtension(ext) {
+		return "audio"
+	}
+	if strings.HasPrefix(mime, "video/") || isVideoExtension(ext) {
+		return "video"
+	}
+	return "file"
+}
+
+func isAudioExtension(ext string) bool {
+	switch ext {
+	case "aac", "amr", "flac", "m4a", "mp3", "oga", "ogg", "opus", "silk", "wav":
+		return true
+	default:
+		return false
+	}
+}
+
+func isVideoExtension(ext string) bool {
+	switch ext {
+	case "avi", "m4v", "mkv", "mov", "mp4", "mpeg", "mpg", "webm":
+		return true
+	default:
+		return false
+	}
+}
+
+func audioFormatFromFile(file core.FileAttachment) string {
+	ext := strings.TrimPrefix(strings.ToLower(filepath.Ext(file.FileName)), ".")
+	if ext != "" {
+		if ext == "oga" || ext == "opus" {
+			return "ogg"
+		}
+		return ext
+	}
+	mime := strings.ToLower(strings.TrimSpace(file.MimeType))
+	if strings.HasPrefix(mime, "audio/") {
+		format := strings.TrimPrefix(mime, "audio/")
+		switch format {
+		case "mpeg":
+			return "mp3"
+		case "x-wav", "wave":
+			return "wav"
+		case "x-m4a":
+			return "m4a"
+		default:
+			return format
+		}
+	}
+	return ""
+}
+
+func estimateAMRPlaytimeMS(data []byte) int {
+	const magic = "#!AMR\n"
+	if len(data) <= len(magic) || string(data[:len(magic)]) != magic {
+		return 0
+	}
+	frameSizes := [...]int{13, 14, 16, 18, 20, 21, 27, 32, 6}
+	offset := len(magic)
+	frames := 0
+	for offset < len(data) {
+		ft := int((data[offset] >> 3) & 0x0f)
+		if ft < 0 || ft >= len(frameSizes) {
+			break
+		}
+		size := frameSizes[ft]
+		if offset+size > len(data) {
+			break
+		}
+		offset += size
+		frames++
+	}
+	if frames == 0 {
+		return 0
+	}
+	return frames * 20
 }
