@@ -10,6 +10,10 @@ import (
 	"github.com/BurntSushi/toml"
 )
 
+func boolPtr(v bool) *bool {
+	return &v
+}
+
 func TestConfigValidate(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -20,6 +24,12 @@ func TestConfigValidate(t *testing.T) {
 			name:    "requires at least one project",
 			cfg:     Config{},
 			wantErr: "at least one [[projects]] entry is required",
+		},
+		{
+			name: "allows management-only startup without projects",
+			cfg: Config{
+				Management: ManagementConfig{Enabled: boolPtr(true)},
+			},
 		},
 		{
 			name: "requires project name",

@@ -617,6 +617,9 @@ func (c *Config) validate() error {
 		return fmt.Errorf("config: relay.timeout_secs must be >= 0")
 	}
 	if len(c.Projects) == 0 {
+		if c.Management.Enabled != nil && *c.Management.Enabled {
+			return nil
+		}
 		return fmt.Errorf("config: at least one [[projects]] entry is required")
 	}
 	for i, proj := range c.Projects {
