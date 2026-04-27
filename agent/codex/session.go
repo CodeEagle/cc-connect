@@ -94,6 +94,9 @@ func newCodexSession(ctx context.Context, cliBin string, cliExtraArgs []string, 
 // If a threadID exists (from a prior turn or resume), uses `codex exec resume <id> <prompt>`.
 // Otherwise uses `codex exec <prompt>` to start a new conversation.
 func (cs *codexSession) Send(prompt string, images []core.ImageAttachment, files []core.FileAttachment) error {
+	if err := core.EnsureWorkDir(cs.workDir); err != nil {
+		return fmt.Errorf("codexSession: %w", err)
+	}
 	if len(files) > 0 {
 		filePaths := core.SaveFilesToDisk(cs.workDir, files)
 		prompt = core.AppendFileRefs(prompt, filePaths)
@@ -599,6 +602,9 @@ func codexToolSuccess(status string, exitCode *int) bool {
 }
 
 func loadCodexRuntimeConfig(ctx context.Context, workDir string, extraEnv []string) (string, string, error) {
+	if err := core.EnsureWorkDir(workDir); err != nil {
+		return "", "", fmt.Errorf("runtime config: %w", err)
+	}
 	cmd := exec.CommandContext(ctx, "codex", "app-server")
 	cmd.Dir = workDir
 	prepareCmdForKill(cmd)

@@ -70,6 +70,9 @@ func (cs *cursorSession) Send(prompt string, images []core.ImageAttachment, file
 	if !cs.alive.Load() {
 		return fmt.Errorf("session is closed")
 	}
+	if err := core.EnsureWorkDir(cs.workDir); err != nil {
+		return fmt.Errorf("cursorSession: %w", err)
+	}
 
 	chatID := cs.CurrentSessionID()
 	isResume := chatID != ""

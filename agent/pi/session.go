@@ -64,6 +64,9 @@ func newPiSession(ctx context.Context, cmd, workDir, model, mode, thinking, resu
 }
 
 func (s *piSession) Send(prompt string, images []core.ImageAttachment, files []core.FileAttachment) error {
+	if err := core.EnsureWorkDir(s.workDir); err != nil {
+		return fmt.Errorf("piSession: %w", err)
+	}
 	// Clean up attachments from previous turns.
 	cleanAttachments(s.workDir)
 

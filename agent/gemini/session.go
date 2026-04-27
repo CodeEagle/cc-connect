@@ -68,6 +68,9 @@ func (gs *geminiSession) Send(prompt string, images []core.ImageAttachment, file
 	if !gs.alive.Load() {
 		return fmt.Errorf("session is closed")
 	}
+	if err := core.EnsureWorkDir(gs.workDir); err != nil {
+		return fmt.Errorf("geminiSession: %w", err)
+	}
 
 	// Save images and files into the workspace so Gemini CLI tools can access them.
 	attachDir := filepath.Join(gs.workDir, ".cc-connect", "attachments")

@@ -67,6 +67,9 @@ func (ks *kimiSession) Send(prompt string, images []core.ImageAttachment, files 
 	if !ks.alive.Load() {
 		return fmt.Errorf("session is closed")
 	}
+	if err := core.EnsureWorkDir(ks.workDir); err != nil {
+		return fmt.Errorf("kimiSession: %w", err)
+	}
 
 	// Save images and files into the workspace so Kimi CLI can access them.
 	attachDir := filepath.Join(ks.workDir, ".cc-connect", "attachments")

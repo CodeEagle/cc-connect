@@ -67,6 +67,9 @@ type acpSessionListEntry struct {
 // and starts its readLoop. The caller owns the returned `teardown`
 // func and must invoke it to reap the child process.
 func (a *Agent) probeSpawn(ctx context.Context, cwd string) (*transport, *bytes.Buffer, func(), error) {
+	if err := core.EnsureWorkDir(cwd); err != nil {
+		return nil, nil, nil, fmt.Errorf("acp: %w", err)
+	}
 	cmd := exec.CommandContext(ctx, a.command, a.args...)
 	cmd.Dir = cwd
 	cmd.Env = core.MergeEnv(os.Environ(), a.extraEnv)

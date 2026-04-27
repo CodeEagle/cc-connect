@@ -127,6 +127,9 @@ func (s *iflowSession) Send(prompt string, images []core.ImageAttachment, files 
 	if !s.alive.Load() {
 		return fmt.Errorf("session is closed")
 	}
+	if err := core.EnsureWorkDir(s.workDir); err != nil {
+		return fmt.Errorf("iflowSession: %w", err)
+	}
 	if !s.turnActive.CompareAndSwap(false, true) {
 		return fmt.Errorf("iflow session is busy")
 	}
