@@ -22,6 +22,7 @@ type Agent struct {
 	workDir    string
 	model      string
 	mode       string // "default" | "yolo"
+	cmd        string // CLI binary name, default "qodercli"
 	sessionEnv []string
 	mu         sync.Mutex
 }
@@ -34,15 +35,21 @@ func New(opts map[string]any) (core.Agent, error) {
 	model, _ := opts["model"].(string)
 	mode, _ := opts["mode"].(string)
 	mode = normalizeMode(mode)
+	cmd, _ := opts["cmd"].(string)
+	cmd = strings.TrimSpace(cmd)
+	if cmd == "" {
+		cmd = "qodercli"
+	}
 
-	if _, err := exec.LookPath("qodercli"); err != nil {
-		return nil, fmt.Errorf("qoder: 'qodercli' not found in PATH, install with: curl -fsSL https://qoder.com/install | bash")
+	if _, err := exec.LookPath(cmd); err != nil {
+		return nil, fmt.Errorf("qoder: %q not found in PATH, install with: curl -fsSL https://qoder.com/install | bash", cmd)
 	}
 
 	return &Agent{
 		workDir: workDir,
 		model:   model,
 		mode:    mode,
+		cmd:     cmd,
 	}, nil
 }
 
@@ -55,8 +62,15 @@ func normalizeMode(raw string) string {
 	}
 }
 
-func (a *Agent) Name() string           { return "qoder" }
-func (a *Agent) CLIBinaryName() string  { return "qodercli" }
+func (a *Agent) Name() string { return "qoder" }
+func (a *Agent) CLIBinaryName() string {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.cmd != "" {
+		return a.cmd
+	}
+	return "qodercli"
+}
 func (a *Agent) CLIDisplayName() string { return "Qoder" }
 
 func (a *Agent) SetWorkDir(dir string) {
@@ -105,10 +119,11 @@ func (a *Agent) StartSession(ctx context.Context, sessionID string) (core.AgentS
 	a.mu.Lock()
 	mode := a.mode
 	model := a.model
+	cmd := a.cmd
 	extraEnv := append([]string{}, a.sessionEnv...)
 	a.mu.Unlock()
 
-	return newQoderSession(ctx, a.workDir, model, mode, sessionID, extraEnv)
+	return newQoderSession(ctx, cmd, a.workDir, model, mode, sessionID, extraEnv)
 }
 
 func (a *Agent) ListSessions(_ context.Context) ([]core.AgentSessionInfo, error) {

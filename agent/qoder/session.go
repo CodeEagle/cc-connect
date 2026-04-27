@@ -23,6 +23,7 @@ import (
 // Each Send() spawns `qodercli -p <prompt> -f stream-json -q`.
 // Subsequent turns use `-r <sessionID>` to resume the conversation.
 type qoderSession struct {
+	cmd       string
 	workDir   string
 	model     string
 	mode      string
@@ -35,10 +36,15 @@ type qoderSession struct {
 	alive     atomic.Bool
 }
 
-func newQoderSession(ctx context.Context, workDir, model, mode, resumeID string, extraEnv []string) (*qoderSession, error) {
+func newQoderSession(ctx context.Context, cmd, workDir, model, mode, resumeID string, extraEnv []string) (*qoderSession, error) {
 	sessionCtx, cancel := context.WithCancel(ctx)
+	cmd = strings.TrimSpace(cmd)
+	if cmd == "" {
+		cmd = "qodercli"
+	}
 
 	qs := &qoderSession{
+		cmd:      cmd,
 		workDir:  workDir,
 		model:    model,
 		mode:     mode,
@@ -85,26 +91,26 @@ func (qs *qoderSession) Send(prompt string, images []core.ImageAttachment, files
 
 	slog.Debug("qoderSession: launching", "resume", sid != "", "args_len", len(args))
 
-	cmd := exec.CommandContext(qs.ctx, "qodercli", args...)
-	cmd.Dir = qs.workDir
+	command := exec.CommandContext(qs.ctx, qs.cmd, args...)
+	command.Dir = qs.workDir
 	if len(qs.extraEnv) > 0 {
-		cmd.Env = core.MergeEnv(os.Environ(), qs.extraEnv)
+		command.Env = core.MergeEnv(os.Environ(), qs.extraEnv)
 	}
 
-	stdout, err := cmd.StdoutPipe()
+	stdout, err := command.StdoutPipe()
 	if err != nil {
 		return fmt.Errorf("qoderSession: stdout pipe: %w", err)
 	}
 
 	var stderrBuf bytes.Buffer
-	cmd.Stderr = &stderrBuf
+	command.Stderr = &stderrBuf
 
-	if err := cmd.Start(); err != nil {
+	if err := command.Start(); err != nil {
 		return fmt.Errorf("qoderSession: start: %w", err)
 	}
 
 	qs.wg.Add(1)
-	go qs.readLoop(cmd, stdout, &stderrBuf)
+	go qs.readLoop(command, stdout, &stderrBuf)
 
 	return nil
 }

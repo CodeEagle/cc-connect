@@ -359,7 +359,7 @@ func (a *Agent) StartSession(ctx context.Context, sessionID string) (core.AgentS
 	}
 
 	if backend == "app_server" {
-		return newAppServerSession(ctx, appServerURL, a.workDir, model, reasoningEffort, mode, sessionID, extraEnv, codexHome)
+		return newAppServerSession(ctx, appServerURL, a.workDir, model, reasoningEffort, mode, sessionID, cliBin, cliExtraArgs, extraEnv, codexHome)
 	}
 	if codexHome != "" {
 		extraEnv = append(extraEnv, "CODEX_HOME="+codexHome)
