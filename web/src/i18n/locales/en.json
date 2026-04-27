@@ -8,6 +8,7 @@
     "cron": "Cron",
     "bridge": "Bridge",
     "skills": "Skills",
+    "terminal": "Terminal",
     "system": "System"
   },
   "dashboard": {
