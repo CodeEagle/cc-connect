@@ -73,6 +73,9 @@ func (qs *qoderSession) Send(prompt string, images []core.ImageAttachment, files
 	if !qs.alive.Load() {
 		return fmt.Errorf("session is closed")
 	}
+	if err := core.EnsureWorkDir(qs.workDir); err != nil {
+		return fmt.Errorf("qoderSession: %w", err)
+	}
 
 	args := []string{"-p", prompt, "-f", "stream-json", "-q", "-w", qs.workDir}
 

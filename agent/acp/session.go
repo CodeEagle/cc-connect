@@ -80,6 +80,9 @@ func newACPSession(ctx context.Context, cfg acpSessionConfig) (*acpSession, erro
 	if err != nil {
 		absWorkDir = cfg.workDir
 	}
+	if err := core.EnsureWorkDir(absWorkDir); err != nil {
+		return nil, fmt.Errorf("acp: %w", err)
+	}
 
 	sessionCtx, cancel := context.WithCancel(ctx)
 	s := &acpSession{

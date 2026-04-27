@@ -119,6 +119,10 @@ func newClaudeSession(ctx context.Context, workDir, cliBin string, cliExtraArgs 
 			return nil, fmt.Errorf("claudeSession: run_as_user spawn refused: %w", err)
 		}
 	}
+	if err := core.EnsureWorkDir(workDir); err != nil {
+		cancel()
+		return nil, fmt.Errorf("claudeSession: %w", err)
+	}
 
 	// Build final argument list.
 	// When cliArgsFlag is set (e.g. "-a"), inner args are bundled into a

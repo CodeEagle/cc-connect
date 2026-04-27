@@ -198,6 +198,9 @@ func newAppServerSession(ctx context.Context, url, workDir, model, effort, mode,
 }
 
 func (s *appServerSession) connect() error {
+	if err := core.EnsureWorkDir(s.workDir); err != nil {
+		return fmt.Errorf("codex app-server: %w", err)
+	}
 	args := append([]string(nil), s.cliArgs...)
 	args = append(args, "app-server")
 	if strings.TrimSpace(s.url) != "" {
@@ -400,6 +403,9 @@ func (s *appServerSession) storeContextUsage(usage *core.ContextUsage) {
 func (s *appServerSession) Send(prompt string, images []core.ImageAttachment, files []core.FileAttachment) error {
 	if !s.alive.Load() {
 		return fmt.Errorf("session is closed")
+	}
+	if err := core.EnsureWorkDir(s.workDir); err != nil {
+		return fmt.Errorf("codex app-server: %w", err)
 	}
 
 	if len(files) > 0 {
