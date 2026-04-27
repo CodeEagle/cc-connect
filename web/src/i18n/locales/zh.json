@@ -8,6 +8,7 @@
     "cron": "定时任务",
     "bridge": "桥接",
     "skills": "技能",
+    "terminal": "终端",
     "system": "系统"
   },
   "dashboard": {

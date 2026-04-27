@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "@tailwindcss/typography": "^0.5.19",
+    "@xterm/xterm": "^5.5.0",
     "clsx": "^2.1.1",
     "highlight.js": "^11.11.1",
     "i18next": "^25.1.2",
