@@ -169,14 +169,10 @@ func main() {
 	config.ConfigPath = configPath
 	slog.Info("config loaded", "path", configPath)
 
-	if len(cfg.Projects) == 0 {
-		fmt.Fprintf(os.Stderr, "Error: no projects configured in %s\n", configPath)
-		fmt.Fprintln(os.Stderr, "Add at least one [[project]] section to your config.toml, or run:")
-		fmt.Fprintln(os.Stderr, "  cc-connect init")
-		os.Exit(1)
-	}
-
 	setupLogger(cfg.Log.Level, logWriter)
+	if len(cfg.Projects) == 0 {
+		slog.Warn("no projects configured; starting management and setup services only", "path", configPath)
+	}
 
 	// run_as_user preflight + isolation audit. MUST run before any engine
 	// or agent is constructed. If any project fails, abort startup
