@@ -44,11 +44,12 @@ type Agent struct {
 	// handshake so that future PermissionModes() calls can reflect the
 	// actual modes this specific ACP agent offers (rather than a
 	// hard-coded fallback that may not match).
-	modesMu       sync.RWMutex
-	modesCache    []core.PermissionModeInfo
-	modesCurrent  string
+	modesMu      sync.RWMutex
+	modesCache   []core.PermissionModeInfo
+	modesCurrent string
 
-	mu sync.RWMutex
+	sendMu sync.Mutex
+	mu     sync.RWMutex
 }
 
 // sessionCallbacks lets a running acpSession report what it learned
@@ -241,6 +242,7 @@ func (a *Agent) StartSession(ctx context.Context, sessionID string) (core.AgentS
 		authMethod:      authMethod,
 		initialMode:     pendingMode,
 		callbacks:       a,
+		agentSendMu:     &a.sendMu,
 	})
 }
 

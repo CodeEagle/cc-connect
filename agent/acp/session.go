@@ -42,7 +42,8 @@ type acpSession struct {
 	acpSessMu sync.RWMutex
 	acpSessID string
 
-	sendMu sync.Mutex
+	sendMu      sync.Mutex
+	agentSendMu *sync.Mutex
 
 	permMu   sync.Mutex
 	permByID map[string]permState
@@ -81,6 +82,7 @@ type acpSessionConfig struct {
 	authMethod      string
 	initialMode     string           // if non-empty, applied via session/set_mode after session/new
 	callbacks       sessionCallbacks // may be nil
+	agentSendMu     *sync.Mutex      // serializes prompt turns across sessions from the same Agent
 }
 
 func newACPSession(ctx context.Context, cfg acpSessionConfig) (*acpSession, error) {
@@ -99,6 +101,7 @@ func newACPSession(ctx context.Context, cfg acpSessionConfig) (*acpSession, erro
 		toolInputByID: make(map[string]string),
 		acpSessID:     cfg.resumeSessionID,
 		callbacks:     cfg.callbacks,
+		agentSendMu:   cfg.agentSendMu,
 	}
 	s.alive.Store(true)
 
@@ -636,8 +639,12 @@ func (s *acpSession) Send(prompt string, images []core.ImageAttachment, files []
 		return fmt.Errorf("acp: session closed")
 	}
 
-	s.sendMu.Lock()
-	defer s.sendMu.Unlock()
+	sendMu := s.agentSendMu
+	if sendMu == nil {
+		sendMu = &s.sendMu
+	}
+	sendMu.Lock()
+	defer sendMu.Unlock()
 
 	filePaths := core.SaveFilesToDisk(s.workDir, files)
 	prompt = core.AppendFileRefs(prompt, filePaths)

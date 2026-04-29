@@ -567,3 +567,93 @@ func TestSessionSend_defaultTextGraceCoversSlowOpenClawFlush(t *testing.T) {
 		t.Fatalf("default ACP prompt text grace = %v, want at least 90s for slow OpenClaw text flushes", acpPromptResultTextGrace)
 	}
 }
+
+func TestSessionSend_sharedAgentLockSerializesConcurrentPrompts(t *testing.T) {
+	sharedSendMu := &sync.Mutex{}
+	s1, wResp1, rReq1 := newTestSession(t, nil)
+	s2, wResp2, rReq2 := newTestSession(t, nil)
+	s1.agentSendMu = sharedSendMu
+	s2.agentSendMu = sharedSendMu
+	s1.promptResultTextGrace = 200 * time.Millisecond
+	s2.promptResultTextGrace = 200 * time.Millisecond
+
+	reqs1 := collectACPTestRequests(t, rReq1)
+	reqs2 := collectACPTestRequests(t, rReq2)
+
+	done1 := make(chan error, 1)
+	go func() {
+		done1 <- s1.Send("first", nil, nil)
+	}()
+
+	req1 := readACPTestRequest(t, reqs1, "first prompt", time.Second)
+	if req1.Method != "session/prompt" {
+		t.Fatalf("first request method = %q, want session/prompt", req1.Method)
+	}
+
+	done2 := make(chan error, 1)
+	go func() {
+		done2 <- s2.Send("second", nil, nil)
+	}()
+
+	select {
+	case req := <-reqs2:
+		t.Fatalf("second prompt was sent before first prompt completed: %+v", req)
+	case <-time.After(50 * time.Millisecond):
+	}
+
+	writeACPTestPromptResponse(t, wResp1, req1.ID, "first text")
+	if err := <-done1; err != nil {
+		t.Fatalf("first Send returned error: %v", err)
+	}
+
+	req2 := readACPTestRequest(t, reqs2, "second prompt", time.Second)
+	if req2.Method != "session/prompt" {
+		t.Fatalf("second request method = %q, want session/prompt", req2.Method)
+	}
+	writeACPTestPromptResponse(t, wResp2, req2.ID, "second text")
+	if err := <-done2; err != nil {
+		t.Fatalf("second Send returned error: %v", err)
+	}
+}
+
+type acpTestRequest struct {
+	ID     json.RawMessage `json:"id"`
+	Method string          `json:"method"`
+}
+
+func collectACPTestRequests(t *testing.T, r io.Reader) <-chan acpTestRequest {
+	t.Helper()
+	ch := make(chan acpTestRequest, 8)
+	go func() {
+		sc := bufio.NewScanner(r)
+		for sc.Scan() {
+			var req acpTestRequest
+			if err := json.Unmarshal(sc.Bytes(), &req); err == nil {
+				ch <- req
+			}
+		}
+	}()
+	return ch
+}
+
+func readACPTestRequest(t *testing.T, ch <-chan acpTestRequest, label string, timeout time.Duration) acpTestRequest {
+	t.Helper()
+	select {
+	case req := <-ch:
+		return req
+	case <-time.After(timeout):
+		t.Fatalf("timed out waiting for %s", label)
+		return acpTestRequest{}
+	}
+}
+
+func writeACPTestPromptResponse(t *testing.T, w io.Writer, id json.RawMessage, text string) {
+	t.Helper()
+	if _, err := fmt.Fprintf(w, `{"jsonrpc":"2.0","id":%s,"result":{"stopReason":"end_turn"}}`+"\n", id); err != nil {
+		t.Fatalf("write prompt result: %v", err)
+	}
+	_, err := fmt.Fprintf(w, `{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"test-session-id","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":%q}}}}`+"\n", text)
+	if err != nil {
+		t.Fatalf("write prompt text: %v", err)
+	}
+}
