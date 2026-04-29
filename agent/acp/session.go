@@ -24,7 +24,9 @@ const toolInputCacheMaxEntries = 1000
 
 // acpPromptResultTextGrace covers ACP servers that resolve session/prompt
 // before their final session/update text notifications have reached stdout.
-const acpPromptResultTextGrace = 30 * time.Second
+// OpenClaw can complete the JSON-RPC call tens of seconds before the final
+// agent_message_chunk is emitted when a resumed session is cold or busy.
+const acpPromptResultTextGrace = 2 * time.Minute
 
 type acpSession struct {
 	workDir string
@@ -618,6 +620,12 @@ func (s *acpSession) waitForTextAfter(seq uint64) {
 				return
 			}
 		case <-timer.C:
+			if s.textSeq.Load() == seq {
+				slog.Warn("acp: prompt completed before text arrived; emitting empty result after grace",
+					"grace", grace,
+					"session_id", s.currentACPSessionID(),
+				)
+			}
 			return
 		}
 	}

@@ -561,3 +561,9 @@ func TestSessionSend_waitsForLateTextBeforeResult(t *testing.T) {
 		t.Fatal("timed out waiting for Send to return")
 	}
 }
+
+func TestSessionSend_defaultTextGraceCoversSlowOpenClawFlush(t *testing.T) {
+	if acpPromptResultTextGrace < 90*time.Second {
+		t.Fatalf("default ACP prompt text grace = %v, want at least 90s for slow OpenClaw text flushes", acpPromptResultTextGrace)
+	}
+}
