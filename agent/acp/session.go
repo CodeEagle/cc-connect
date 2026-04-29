@@ -22,6 +22,10 @@ import (
 // roughly half the map (iteration order is arbitrary) to bound memory.
 const toolInputCacheMaxEntries = 1000
 
+// acpPromptResultTextGrace covers ACP servers that resolve session/prompt
+// before their final session/update text notifications have reached stdout.
+const acpPromptResultTextGrace = 30 * time.Second
+
 type acpSession struct {
 	workDir string
 	events  chan core.Event
@@ -43,6 +47,7 @@ type acpSession struct {
 
 	toolInputMu   sync.Mutex
 	toolInputByID map[string]string // toolCallId -> summarized tool input
+	textSeq       atomic.Uint64
 
 	// modesMu guards availableModes and currentMode. Both fields are
 	// populated on handshake (session/new or session/load response) and
@@ -52,7 +57,8 @@ type acpSession struct {
 	availableModes []acpModeInfo
 	currentMode    string
 
-	callbacks sessionCallbacks // may be nil (tests, integration harness)
+	promptResultTextGrace time.Duration
+	callbacks             sessionCallbacks // may be nil (tests, integration harness)
 }
 
 type permState struct {
@@ -392,7 +398,7 @@ func (s *acpSession) maybeAbsorbCurrentModeUpdate(params json.RawMessage) {
 		return
 	}
 	var head struct {
-		Kind     string `json:"sessionUpdate"`
+		Kind          string `json:"sessionUpdate"`
 		CurrentModeID string `json:"currentModeId"`
 	}
 	if json.Unmarshal(wrap.Update, &head) != nil {
@@ -579,9 +585,41 @@ func (s *acpSession) emit(ev core.Event) {
 	if ev.SessionID == "" {
 		ev.SessionID = s.currentACPSessionID()
 	}
+	if ev.Type == core.EventText && ev.Content != "" {
+		s.textSeq.Add(1)
+	}
 	select {
 	case s.events <- ev:
 	case <-s.ctx.Done():
+	}
+}
+
+func (s *acpSession) waitForTextAfter(seq uint64) {
+	if s.textSeq.Load() != seq {
+		return
+	}
+	grace := s.promptResultTextGrace
+	if grace == 0 {
+		grace = acpPromptResultTextGrace
+	}
+	if grace < 0 {
+		return
+	}
+	timer := time.NewTimer(grace)
+	defer timer.Stop()
+	ticker := time.NewTicker(25 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-s.ctx.Done():
+			return
+		case <-ticker.C:
+			if s.textSeq.Load() != seq {
+				return
+			}
+		case <-timer.C:
+			return
+		}
 	}
 }
 
@@ -612,6 +650,7 @@ func (s *acpSession) Send(prompt string, images []core.ImageAttachment, files []
 		"prompt":    promptBlocks,
 	}
 
+	startTextSeq := s.textSeq.Load()
 	_, err := s.tr.call(s.ctx, "session/prompt", params)
 	if err != nil {
 		s.emit(core.Event{Type: core.EventError, Error: err})
@@ -619,6 +658,7 @@ func (s *acpSession) Send(prompt string, images []core.ImageAttachment, files []
 	}
 
 	// Text was streamed via session/update; engine aggregates EventText.
+	s.waitForTextAfter(startTextSeq)
 	s.emit(core.Event{
 		Type:      core.EventResult,
 		SessionID: sid,

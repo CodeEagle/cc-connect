@@ -277,13 +277,21 @@ func TestProbeListSessions_parsesSessions(t *testing.T) {
 // fakeCallbacks captures reportModes / reportListSupported invocations
 // so tests can assert on them deterministically.
 type fakeCallbacks struct {
-	mu         sync.Mutex
-	modes      []acpModesBlock
-	listCalls  []bool
+	mu        sync.Mutex
+	modes     []acpModesBlock
+	listCalls []bool
 }
 
-func (f *fakeCallbacks) reportModes(b acpModesBlock)       { f.mu.Lock(); f.modes = append(f.modes, b); f.mu.Unlock() }
-func (f *fakeCallbacks) reportListSupported(supported bool) { f.mu.Lock(); f.listCalls = append(f.listCalls, supported); f.mu.Unlock() }
+func (f *fakeCallbacks) reportModes(b acpModesBlock) {
+	f.mu.Lock()
+	f.modes = append(f.modes, b)
+	f.mu.Unlock()
+}
+func (f *fakeCallbacks) reportListSupported(supported bool) {
+	f.mu.Lock()
+	f.listCalls = append(f.listCalls, supported)
+	f.mu.Unlock()
+}
 func (f *fakeCallbacks) lastModes() (acpModesBlock, bool) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -493,5 +501,63 @@ func TestSession_maybeAbsorbCurrentModeUpdate(t *testing.T) {
 	last, ok := cb.lastModes()
 	if !ok || last.CurrentModeID != "plan" {
 		t.Fatalf("callback should have been fired with currentModeId=plan, got %+v ok=%v", last, ok)
+	}
+}
+
+func TestSessionSend_waitsForLateTextBeforeResult(t *testing.T) {
+	s, wResp, rReq := newTestSession(t, nil)
+	s.promptResultTextGrace = 200 * time.Millisecond
+
+	go func() {
+		sc := bufio.NewScanner(rReq)
+		for sc.Scan() {
+			var req struct {
+				ID     json.RawMessage `json:"id"`
+				Method string          `json:"method"`
+			}
+			if err := json.Unmarshal(sc.Bytes(), &req); err != nil {
+				continue
+			}
+			if req.Method != "session/prompt" {
+				continue
+			}
+			_, _ = fmt.Fprintf(wResp, `{"jsonrpc":"2.0","id":%s,"result":{"stopReason":"end_turn"}}`+"\n", req.ID)
+			time.Sleep(20 * time.Millisecond)
+			_, _ = io.WriteString(wResp, `{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"test-session-id","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"late hello"}}}}`+"\n")
+			return
+		}
+	}()
+
+	done := make(chan error, 1)
+	go func() {
+		done <- s.Send("hi", nil, nil)
+	}()
+
+	readEvent := func(label string) core.Event {
+		t.Helper()
+		select {
+		case ev := <-s.Events():
+			return ev
+		case <-time.After(time.Second):
+			t.Fatalf("timed out waiting for %s", label)
+			return core.Event{}
+		}
+	}
+
+	first := readEvent("late text")
+	if first.Type != core.EventText || first.Content != "late hello" {
+		t.Fatalf("first event = %+v, want late EventText before EventResult", first)
+	}
+	second := readEvent("result")
+	if second.Type != core.EventResult {
+		t.Fatalf("second event = %+v, want EventResult after late text", second)
+	}
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("Send returned error: %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for Send to return")
 	}
 }
