@@ -122,14 +122,14 @@ func TestClassifyOutboundFile(t *testing.T) {
 		want string
 	}{
 		{
-			name: "audio mime",
+			name: "audio mime stays file",
 			file: core.FileAttachment{MimeType: "audio/mpeg", FileName: "reply.bin"},
-			want: "audio",
+			want: "file",
 		},
 		{
-			name: "audio extension",
+			name: "audio extension stays file",
 			file: core.FileAttachment{MimeType: "application/octet-stream", FileName: "reply.amr"},
-			want: "audio",
+			want: "file",
 		},
 		{
 			name: "video mime",

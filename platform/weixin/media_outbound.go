@@ -238,8 +238,6 @@ func (p *Platform) SendFile(ctx context.Context, replyCtx any, file core.FileAtt
 	}
 
 	switch classifyOutboundFile(file) {
-	case "audio":
-		return p.SendAudio(ctx, replyCtx, file.Data, audioFormatFromFile(file))
 	case "video":
 		ref, err := p.uploadToWeixinCDN(ctx, rc.peerUserID, file.Data, uploadMediaVideo, "SendFileVideo")
 		if err != nil {
@@ -315,9 +313,8 @@ func (p *Platform) SendAudio(ctx context.Context, replyCtx any, audio []byte, fo
 func classifyOutboundFile(file core.FileAttachment) string {
 	mime := strings.ToLower(strings.TrimSpace(file.MimeType))
 	ext := strings.TrimPrefix(strings.ToLower(filepath.Ext(file.FileName)), ".")
-	if strings.HasPrefix(mime, "audio/") || isAudioExtension(ext) {
-		return "audio"
-	}
+	// FileSender must preserve audio attachments as files. Native voice delivery
+	// is handled by SendAudio, not by reclassifying --file payloads.
 	if strings.HasPrefix(mime, "video/") || isVideoExtension(ext) {
 		return "video"
 	}
